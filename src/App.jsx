@@ -1,49 +1,44 @@
 import { useState, useEffect } from 'react';
+import { initializeApp } from 'firebase/app';
+import {
+  getFirestore,
+  collection,
+  onSnapshot,
+  doc,
+  setDoc,
+  deleteDoc,
+  updateDoc,
+  addDoc,
+  getDocs,
+} from 'firebase/firestore';
 import './App.css';
 
 const ADMIN_PASSWORD = 'battlehub123';
 
-const JSONBIN_BIN_ID = '6a4f3f00da38895dfe443b05';
-const JSONBIN_API_KEY = '$2a$10$G2ah91CPp1foREAjibUa7ujAZiPNhambO4yA9N1oQCC3nSJj1c502';
-const JSONBIN_BASE = `https://api.jsonbin.io/v3/b/${JSONBIN_BIN_ID}`;
+// ---------- Firebase config ----------
+// Yahan apna Firebase project ka config daalo (Firebase Console -> Project Settings -> Your apps)
+const firebaseConfig = {
+  apiKey: 'YOUR_API_KEY',
+  authDomain: 'YOUR_PROJECT.firebaseapp.com',
+  projectId: 'YOUR_PROJECT_ID',
+  storageBucket: 'YOUR_PROJECT.appspot.com',
+  messagingSenderId: 'YOUR_SENDER_ID',
+  appId: 'YOUR_APP_ID',
+};
+
+const app = initializeApp(firebaseConfig);
+const db = getFirestore(app);
+
+const tournamentsCol = collection(db, 'tournaments');
+const registrationsCol = collection(db, 'registrations');
 
 const DEFAULT_TOURNAMENTS = [
-  { id: 1, name: 'Sunday Solo Clash', mode: 'Solo', entryFee: 80, prizePool: 12000, perKillReward: 50, date: 'Sun, 6 Jul', time: '8 PM', status: 'Open', image: null },
-  { id: 2, name: 'Miramar Duo Rush', mode: 'Duo', entryFee: 120, prizePool: 20000, perKillReward: 60, date: 'Mon, 7 Jul', time: '9 PM', status: 'Open', image: null },
-  { id: 3, name: 'Sanhok Squad Series', mode: 'Squad', entryFee: 200, prizePool: 50000, perKillReward: 100, date: 'Wed, 9 Jul', time: '9 PM', status: 'Closed', image: null },
+  { id: '1', name: 'Sunday Solo Clash', mode: 'Solo', entryFee: 80, prizePool: 12000, perKillReward: 50, date: 'Sun, 6 Jul', time: '8 PM', status: 'Open', image: null },
+  { id: '2', name: 'Miramar Duo Rush', mode: 'Duo', entryFee: 120, prizePool: 20000, perKillReward: 60, date: 'Mon, 7 Jul', time: '9 PM', status: 'Open', image: null },
+  { id: '3', name: 'Sanhok Squad Series', mode: 'Squad', entryFee: 200, prizePool: 50000, perKillReward: 100, date: 'Wed, 9 Jul', time: '9 PM', status: 'Closed', image: null },
 ];
 
 const EMPTY_FORM = { name: '', mode: 'Solo', entryFee: '', prizePool: '', perKillReward: '', date: '', time: '', status: 'Open', image: null };
-
-// ---------- jsonbin.io helpers ----------
-async function getBinRecord() {
-  const res = await fetch(`${JSONBIN_BASE}/latest`, {
-    headers: { 'X-Master-Key': JSONBIN_API_KEY },
-  });
-  if (!res.ok) {
-    const body = await res.text().catch(() => '');
-    throw new Error(`Read failed (${res.status}): ${body || res.statusText}`);
-  }
-  const data = await res.json();
-  return data.record || {};
-}
-
-async function putBinRecord(record) {
-  const res = await fetch(JSONBIN_BASE, {
-    method: 'PUT',
-    headers: {
-      'Content-Type': 'application/json',
-      'X-Master-Key': JSONBIN_API_KEY,
-    },
-    body: JSON.stringify(record),
-  });
-  if (!res.ok) {
-    const body = await res.text().catch(() => '');
-    throw new Error(`Write failed (${res.status}): ${body || res.statusText}`);
-  }
-  const data = await res.json();
-  return data.record;
-}
 
 function App() {
   const [menuOpen, setMenuOpen] = useState(false);
@@ -54,39 +49,31 @@ function App() {
   const [tournaments, setTournaments] = useState([]);
   const [loadingTournaments, setLoadingTournaments] = useState(true);
 
+  // Real-time listener - tournaments collection mein jo bhi change ho, turant reflect hoga
   useEffect(() => {
-    (async () => {
-      try {
-        const record = await getBinRecord();
-        if (record.tournaments && record.tournaments.length > 0) {
-          setTournaments(record.tournaments);
+    const unsub = onSnapshot(
+      tournamentsCol,
+      async (snapshot) => {
+        if (snapshot.empty) {
+          // Collection khali hai - defaults se initialize karo
+          for (const t of DEFAULT_TOURNAMENTS) {
+            await setDoc(doc(db, 'tournaments', t.id), t);
+          }
+          // onSnapshot khud dobara chal jayega jab data add hoga
         } else {
-          setTournaments(DEFAULT_TOURNAMENTS);
-          await putBinRecord({
-            ...record,
-            tournaments: DEFAULT_TOURNAMENTS,
-            registrations: record.registrations || [],
-          });
+          const list = snapshot.docs.map(d => ({ ...d.data(), id: d.id }));
+          setTournaments(list);
+          setLoadingTournaments(false);
         }
-      } catch (err) {
-        console.error('Failed to load tournaments from jsonbin:', err);
-        setTournaments(DEFAULT_TOURNAMENTS);
-      } finally {
+      },
+      (err) => {
+        console.error('Tournaments listener error:', err);
+        alert('Tournaments load nahi ho rahe.\n\nWajah: ' + err.message);
         setLoadingTournaments(false);
       }
-    })();
+    );
+    return () => unsub();
   }, []);
-
-  async function saveTournaments(list) {
-    setTournaments(list);
-    try {
-      const record = await getBinRecord();
-      await putBinRecord({ ...record, tournaments: list });
-    } catch (err) {
-      console.error('Failed to save tournaments to jsonbin:', err);
-      alert('Tournament save nahi hua.\n\nWajah: ' + err.message);
-    }
-  }
 
   const [isAdmin, setIsAdmin] = useState(false);
   const [adminView, setAdminView] = useState('tournaments');
@@ -97,20 +84,20 @@ function App() {
 
   async function loadRegistrations() {
     try {
-      const record = await getBinRecord();
-      const list = record.registrations || [];
-      setRegistrations([...list].sort((a, b) => b.id - a.id));
+      const snap = await getDocs(registrationsCol);
+      const list = snap.docs.map(d => ({ ...d.data(), id: d.id }));
+      list.sort((a, b) => b.submittedAtMs - a.submittedAtMs);
+      setRegistrations(list);
     } catch (err) {
-      console.error('Failed to load registrations from jsonbin:', err);
+      console.error('Failed to load registrations:', err);
+      alert('Registrations load nahi hui.\n\nWajah: ' + err.message);
     }
   }
 
   async function updateRegistrationStatus(id, status) {
-    const updated = registrations.map(r => (r.id === id ? { ...r, status } : r));
-    setRegistrations(updated);
     try {
-      const record = await getBinRecord();
-      await putBinRecord({ ...record, registrations: updated });
+      await updateDoc(doc(db, 'registrations', id), { status });
+      setRegistrations(prev => prev.map(r => (r.id === id ? { ...r, status } : r)));
     } catch (err) {
       console.error('Failed to update registration status:', err);
       alert('Status update save nahi hua.\n\nWajah: ' + err.message);
@@ -119,11 +106,9 @@ function App() {
 
   async function deleteRegistration(id) {
     if (window.confirm('Is registration ko delete karna hai?')) {
-      const updated = registrations.filter(r => r.id !== id);
-      setRegistrations(updated);
       try {
-        const record = await getBinRecord();
-        await putBinRecord({ ...record, registrations: updated });
+        await deleteDoc(doc(db, 'registrations', id));
+        setRegistrations(prev => prev.filter(r => r.id !== id));
       } catch (err) {
         console.error('Failed to delete registration:', err);
         alert('Delete save nahi hua.\n\nWajah: ' + err.message);
@@ -194,36 +179,50 @@ function App() {
     reader.readAsDataURL(file);
   }
 
-  function handleAdminSubmit(e) {
+  async function handleAdminSubmit(e) {
     e.preventDefault();
-    if (editingId === 'new') {
-      const newTournament = {
-        id: Date.now(),
-        name: adminForm.name,
-        mode: adminForm.mode,
-        entryFee: Number(adminForm.entryFee),
-        prizePool: Number(adminForm.prizePool),
-        perKillReward: Number(adminForm.perKillReward) || 0,
-        date: adminForm.date,
-        time: adminForm.time,
-        status: adminForm.status,
-        image: adminForm.image || null,
-      };
-      saveTournaments([...tournaments, newTournament]);
-    } else {
-      const updated = tournaments.map(t =>
-        t.id === editingId
-          ? { ...t, name: adminForm.name, mode: adminForm.mode, entryFee: Number(adminForm.entryFee), prizePool: Number(adminForm.prizePool), perKillReward: Number(adminForm.perKillReward) || 0, date: adminForm.date, time: adminForm.time, status: adminForm.status, image: adminForm.image || null }
-          : t
-      );
-      saveTournaments(updated);
+    try {
+      if (editingId === 'new') {
+        const newTournament = {
+          name: adminForm.name,
+          mode: adminForm.mode,
+          entryFee: Number(adminForm.entryFee),
+          prizePool: Number(adminForm.prizePool),
+          perKillReward: Number(adminForm.perKillReward) || 0,
+          date: adminForm.date,
+          time: adminForm.time,
+          status: adminForm.status,
+          image: adminForm.image || null,
+        };
+        await addDoc(tournamentsCol, newTournament);
+      } else {
+        await updateDoc(doc(db, 'tournaments', editingId), {
+          name: adminForm.name,
+          mode: adminForm.mode,
+          entryFee: Number(adminForm.entryFee),
+          prizePool: Number(adminForm.prizePool),
+          perKillReward: Number(adminForm.perKillReward) || 0,
+          date: adminForm.date,
+          time: adminForm.time,
+          status: adminForm.status,
+          image: adminForm.image || null,
+        });
+      }
+      cancelAdminForm();
+    } catch (err) {
+      console.error('Failed to save tournament:', err);
+      alert('Tournament save nahi hua.\n\nWajah: ' + err.message);
     }
-    cancelAdminForm();
   }
 
-  function deleteTournament(id) {
+  async function deleteTournament(id) {
     if (window.confirm('Is tournament ko delete karna hai?')) {
-      saveTournaments(tournaments.filter(t => t.id !== id));
+      try {
+        await deleteDoc(doc(db, 'tournaments', id));
+      } catch (err) {
+        console.error('Failed to delete tournament:', err);
+        alert('Delete save nahi hua.\n\nWajah: ' + err.message);
+      }
     }
   }
 
@@ -255,7 +254,6 @@ function App() {
   async function handleRegSubmit(e) {
     e.preventDefault();
     const registration = {
-      id: Date.now(),
       tournament: modalTournament.name,
       entryFee: modalTournament.entryFee,
       pubgName: regForm.pubgName,
@@ -264,15 +262,13 @@ function App() {
       screenshot: regForm.screenshot,
       status: 'pending',
       submittedAt: new Date().toISOString(),
+      submittedAtMs: Date.now(),
     };
     try {
-      const record = await getBinRecord();
-      const existing = record.registrations || [];
-      existing.push(registration);
-      await putBinRecord({ ...record, registrations: existing });
+      await addDoc(registrationsCol, registration);
       setSubmitted(true);
     } catch (err) {
-      console.error('Failed to save registration to jsonbin:', err);
+      console.error('Failed to save registration:', err);
       alert('Registration save nahi hui.\n\nWajah: ' + err.message);
     }
   }
