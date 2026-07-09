@@ -17,13 +17,15 @@ const ADMIN_PASSWORD = 'battlehub123';
 
 // ---------- Firebase config ----------
 // Yahan apna Firebase project ka config daalo (Firebase Console -> Project Settings -> Your apps)
+// For Firebase JS SDK v7.20.0 and later, measurementId is optional
 const firebaseConfig = {
-  apiKey: 'YOUR_API_KEY',
-  authDomain: 'YOUR_PROJECT.firebaseapp.com',
-  projectId: 'YOUR_PROJECT_ID',
-  storageBucket: 'YOUR_PROJECT.appspot.com',
-  messagingSenderId: 'YOUR_SENDER_ID',
-  appId: 'YOUR_APP_ID',
+  apiKey: "AIzaSyDgCMEg0O2sDNEbJ2whHVNYQHxc_4Ot40E",
+  authDomain: "battle-hub-68d1a.firebaseapp.com",
+  projectId: "battle-hub-68d1a",
+  storageBucket: "battle-hub-68d1a.firebasestorage.app",
+  messagingSenderId: "1019869345085",
+  appId: "1:1019869345085:web:20cd2f61ec5ddf6770c154",
+  measurementId: "G-HB0CVGE9P0"
 };
 
 const app = initializeApp(firebaseConfig);
