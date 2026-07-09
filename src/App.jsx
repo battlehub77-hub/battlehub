@@ -3,6 +3,10 @@ import './App.css';
 
 const ADMIN_PASSWORD = 'battlehub123';
 
+const JSONBIN_BIN_ID = '6a4f3f00da38895dfe443b05';
+const JSONBIN_API_KEY = '$2a$10$G2ah91CPp1foREAjibUa7ujAZiPNhambO4yA9N1oQCC3nSJj1c502';
+const JSONBIN_BASE = `https://api.jsonbin.io/v3/b/${JSONBIN_BIN_ID}`;
+
 const DEFAULT_TOURNAMENTS = [
   { id: 1, name: 'Sunday Solo Clash', mode: 'Solo', entryFee: 80, prizePool: 12000, perKillReward: 50, date: 'Sun, 6 Jul', time: '8 PM', status: 'Open', image: null },
   { id: 2, name: 'Miramar Duo Rush', mode: 'Duo', entryFee: 120, prizePool: 20000, perKillReward: 60, date: 'Mon, 7 Jul', time: '9 PM', status: 'Open', image: null },
@@ -11,6 +15,30 @@ const DEFAULT_TOURNAMENTS = [
 
 const EMPTY_FORM = { name: '', mode: 'Solo', entryFee: '', prizePool: '', perKillReward: '', date: '', time: '', status: 'Open', image: null };
 
+// ---------- jsonbin.io helpers ----------
+async function getBinRecord() {
+  const res = await fetch(`${JSONBIN_BASE}/latest`, {
+    headers: { 'X-Master-Key': JSONBIN_API_KEY },
+  });
+  if (!res.ok) throw new Error('jsonbin read failed: ' + res.status);
+  const data = await res.json();
+  return data.record || {};
+}
+
+async function putBinRecord(record) {
+  const res = await fetch(JSONBIN_BASE, {
+    method: 'PUT',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Master-Key': JSONBIN_API_KEY,
+    },
+    body: JSON.stringify(record),
+  });
+  if (!res.ok) throw new Error('jsonbin write failed: ' + res.status);
+  const data = await res.json();
+  return data.record;
+}
+
 function App() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [modalTournament, setModalTournament] = useState(null);
@@ -18,20 +46,41 @@ function App() {
   const [regForm, setRegForm] = useState({ pubgName: '', pubgUid: '', whatsapp: '', screenshot: null });
 
   const [tournaments, setTournaments] = useState([]);
+  const [loadingTournaments, setLoadingTournaments] = useState(true);
 
   useEffect(() => {
-    const saved = localStorage.getItem('battlehub_tournaments');
-    if (saved) {
-      setTournaments(JSON.parse(saved));
-    } else {
-      setTournaments(DEFAULT_TOURNAMENTS);
-      localStorage.setItem('battlehub_tournaments', JSON.stringify(DEFAULT_TOURNAMENTS));
-    }
+    (async () => {
+      try {
+        const record = await getBinRecord();
+        if (record.tournaments && record.tournaments.length > 0) {
+          setTournaments(record.tournaments);
+        } else {
+          // Bin khali hai - defaults se initialize karo
+          setTournaments(DEFAULT_TOURNAMENTS);
+          await putBinRecord({
+            ...record,
+            tournaments: DEFAULT_TOURNAMENTS,
+            registrations: record.registrations || [],
+          });
+        }
+      } catch (err) {
+        console.error('Failed to load tournaments from jsonbin:', err);
+        setTournaments(DEFAULT_TOURNAMENTS);
+      } finally {
+        setLoadingTournaments(false);
+      }
+    })();
   }, []);
 
-  function saveTournaments(list) {
-    setTournaments(list);
-    localStorage.setItem('battlehub_tournaments', JSON.stringify(list));
+  async function saveTournaments(list) {
+    setTournaments(list); // UI turant update ho jaye
+    try {
+      const record = await getBinRecord();
+      await putBinRecord({ ...record, tournaments: list });
+    } catch (err) {
+      console.error('Failed to save tournaments to jsonbin:', err);
+      alert('Tournament save nahi hua (internet/bin issue), dobara try karein.');
+    }
   }
 
   const [isAdmin, setIsAdmin] = useState(false);
@@ -41,22 +90,39 @@ function App() {
   const [registrations, setRegistrations] = useState([]);
   const [roomDetails, setRoomDetails] = useState({});
 
-  function loadRegistrations() {
-    const saved = JSON.parse(localStorage.getItem('battlehub_registrations') || '[]');
-    setRegistrations(saved.sort((a, b) => b.id - a.id));
+  async function loadRegistrations() {
+    try {
+      const record = await getBinRecord();
+      const list = record.registrations || [];
+      setRegistrations([...list].sort((a, b) => b.id - a.id));
+    } catch (err) {
+      console.error('Failed to load registrations from jsonbin:', err);
+    }
   }
 
-  function updateRegistrationStatus(id, status) {
+  async function updateRegistrationStatus(id, status) {
     const updated = registrations.map(r => (r.id === id ? { ...r, status } : r));
     setRegistrations(updated);
-    localStorage.setItem('battlehub_registrations', JSON.stringify(updated));
+    try {
+      const record = await getBinRecord();
+      await putBinRecord({ ...record, registrations: updated });
+    } catch (err) {
+      console.error('Failed to update registration status:', err);
+      alert('Status update save nahi hua, dobara try karein.');
+    }
   }
 
-  function deleteRegistration(id) {
+  async function deleteRegistration(id) {
     if (window.confirm('Is registration ko delete karna hai?')) {
       const updated = registrations.filter(r => r.id !== id);
       setRegistrations(updated);
-      localStorage.setItem('battlehub_registrations', JSON.stringify(updated));
+      try {
+        const record = await getBinRecord();
+        await putBinRecord({ ...record, registrations: updated });
+      } catch (err) {
+        console.error('Failed to delete registration:', err);
+        alert('Delete save nahi hua, dobara try karein.');
+      }
     }
   }
 
@@ -181,7 +247,7 @@ function App() {
     reader.readAsDataURL(file);
   }
 
-  function handleRegSubmit(e) {
+  async function handleRegSubmit(e) {
     e.preventDefault();
     const registration = {
       id: Date.now(),
@@ -194,10 +260,16 @@ function App() {
       status: 'pending',
       submittedAt: new Date().toISOString(),
     };
-    const existing = JSON.parse(localStorage.getItem('battlehub_registrations') || '[]');
-    existing.push(registration);
-    localStorage.setItem('battlehub_registrations', JSON.stringify(existing));
-    setSubmitted(true);
+    try {
+      const record = await getBinRecord();
+      const existing = record.registrations || [];
+      existing.push(registration);
+      await putBinRecord({ ...record, registrations: existing });
+      setSubmitted(true);
+    } catch (err) {
+      console.error('Failed to save registration to jsonbin:', err);
+      alert('Registration save nahi hui. Internet check karein aur dobara try karein.');
+    }
   }
 
   if (isAdmin) {
@@ -270,7 +342,8 @@ function App() {
           )}
 
           <div className="admin-list">
-            {tournaments.length === 0 && <p className="featured-sub">Koi tournament nahi hai. Upar se naya add karo.</p>}
+            {loadingTournaments && <p className="featured-sub">Tournaments load ho rahe hain...</p>}
+            {!loadingTournaments && tournaments.length === 0 && <p className="featured-sub">Koi tournament nahi hai. Upar se naya add karo.</p>}
             {tournaments.map(t => (
               <div className="admin-row" key={t.id}>
                 <div className="admin-row-info">
@@ -397,6 +470,7 @@ function App() {
           <p>Pick your mode, check the slots, and register in under two minutes.</p>
         </div>
         <div className="grid-3">
+          {loadingTournaments && <p className="featured-sub">Tournaments load ho rahe hain...</p>}
           {tournaments.map(t => (
             <div className="t-card" key={t.id}>
               <div
@@ -420,7 +494,7 @@ function App() {
               </div>
             </div>
           ))}
-          {tournaments.length === 0 && <p className="featured-sub">Filhal koi tournament available nahi hai.</p>}
+          {!loadingTournaments && tournaments.length === 0 && <p className="featured-sub">Filhal koi tournament available nahi hai.</p>}
         </div>
       </section>
 
