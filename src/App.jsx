@@ -20,7 +20,10 @@ async function getBinRecord() {
   const res = await fetch(`${JSONBIN_BASE}/latest`, {
     headers: { 'X-Master-Key': JSONBIN_API_KEY },
   });
-  if (!res.ok) throw new Error('jsonbin read failed: ' + res.status);
+  if (!res.ok) {
+    const body = await res.text().catch(() => '');
+    throw new Error(`Read failed (${res.status}): ${body || res.statusText}`);
+  }
   const data = await res.json();
   return data.record || {};
 }
@@ -34,7 +37,10 @@ async function putBinRecord(record) {
     },
     body: JSON.stringify(record),
   });
-  if (!res.ok) throw new Error('jsonbin write failed: ' + res.status);
+  if (!res.ok) {
+    const body = await res.text().catch(() => '');
+    throw new Error(`Write failed (${res.status}): ${body || res.statusText}`);
+  }
   const data = await res.json();
   return data.record;
 }
@@ -55,7 +61,6 @@ function App() {
         if (record.tournaments && record.tournaments.length > 0) {
           setTournaments(record.tournaments);
         } else {
-          // Bin khali hai - defaults se initialize karo
           setTournaments(DEFAULT_TOURNAMENTS);
           await putBinRecord({
             ...record,
@@ -73,13 +78,13 @@ function App() {
   }, []);
 
   async function saveTournaments(list) {
-    setTournaments(list); // UI turant update ho jaye
+    setTournaments(list);
     try {
       const record = await getBinRecord();
       await putBinRecord({ ...record, tournaments: list });
     } catch (err) {
       console.error('Failed to save tournaments to jsonbin:', err);
-      alert('Tournament save nahi hua (internet/bin issue), dobara try karein.');
+      alert('Tournament save nahi hua.\n\nWajah: ' + err.message);
     }
   }
 
@@ -108,7 +113,7 @@ function App() {
       await putBinRecord({ ...record, registrations: updated });
     } catch (err) {
       console.error('Failed to update registration status:', err);
-      alert('Status update save nahi hua, dobara try karein.');
+      alert('Status update save nahi hua.\n\nWajah: ' + err.message);
     }
   }
 
@@ -121,7 +126,7 @@ function App() {
         await putBinRecord({ ...record, registrations: updated });
       } catch (err) {
         console.error('Failed to delete registration:', err);
-        alert('Delete save nahi hua, dobara try karein.');
+        alert('Delete save nahi hua.\n\nWajah: ' + err.message);
       }
     }
   }
@@ -268,7 +273,7 @@ function App() {
       setSubmitted(true);
     } catch (err) {
       console.error('Failed to save registration to jsonbin:', err);
-      alert('Registration save nahi hui. Internet check karein aur dobara try karein.');
+      alert('Registration save nahi hui.\n\nWajah: ' + err.message);
     }
   }
 
